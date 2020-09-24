@@ -22,11 +22,16 @@ package edu.nmsu.cs.webserver;
  **/
 
 import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
+import java.net.URL;
+import java.net.URLConnection;
 import java.text.DateFormat;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.Date;
 import java.util.TimeZone;
 
@@ -34,7 +39,9 @@ public class WebWorker implements Runnable
 {
 
 	private Socket socket;
-
+	private String authority, path;
+	private int response;
+	private StringBuffer buffer;
 	/**
 	 * Constructor: must have a valid open socket
 	 **/
@@ -57,7 +64,7 @@ public class WebWorker implements Runnable
 			OutputStream os = socket.getOutputStream();
 			readHTTPRequest(is);
 			writeHTTPHeader(os, "text/html");
-			writeContent(os);
+			writeContent(os, response, buffer);
 			os.flush();
 			socket.close();
 		}
@@ -74,7 +81,8 @@ public class WebWorker implements Runnable
 	 **/
 	private void readHTTPRequest(InputStream is)
 	{
-		String line;
+		String line, request;
+		int needPath = 1;
 		BufferedReader r = new BufferedReader(new InputStreamReader(is));
 		while (true)
 		{
@@ -83,6 +91,15 @@ public class WebWorker implements Runnable
 				while (!r.ready())
 					Thread.sleep(1);
 				line = r.readLine();
+				if (needPath == 1) {
+					request = line;
+					authority = request.split(" ")[0];
+					String tokens[] = request.split(" ");
+					// here I obtain the directory path to the html file
+					// the root is the directory where the webserver was executed
+					path = tokens[1];
+					needPath = 0;
+				} // end if (needPath...
 				System.err.println("Request line: (" + line + ")");
 				if (line.length() == 0)
 					break;
@@ -106,10 +123,36 @@ public class WebWorker implements Runnable
 	 **/
 	private void writeHTTPHeader(OutputStream os, String contentType) throws Exception
 	{
+		LocalDate date = LocalDate.now();
+		String line = null;
+		response = 200;
 		Date d = new Date();
 		DateFormat df = DateFormat.getDateTimeInstance();
 		df.setTimeZone(TimeZone.getTimeZone("GMT"));
-		os.write("HTTP/1.1 200 OK\n".getBytes());
+		if (authority.matches("GET") && path.contains(".html")) {
+			buffer = new StringBuffer();
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM-dd-yyyy");
+			// here I must edit the path to recognize windows path structure
+			// comment out code up to the body of for statement to have 
+			// server work for Linux machines
+			String tokens[] = path.split("/");
+			path = ".";
+			for (int i = 0; i < tokens.length; i++)
+				path = path + "\\" + tokens[i]; 
+			try (BufferedReader br = new BufferedReader(new FileReader(path))) {
+				while((line = br.readLine()) != null) {
+					line = line.replaceAll("<cs371date>", date.format(formatter));
+					line = line.replaceAll("<cs371server>", "Chris Davila's Server");
+					buffer.append(line);
+				}
+			} 
+			catch (Exception e) {
+				response = 404;
+				os.write("HTTP/1.0 404 Not Found\n".getBytes());
+			}
+		} // end if (authority.matches...
+		if (response == 200)
+			os.write("HTTP/1.1 200 OK\n".getBytes());
 		os.write("Date: ".getBytes());
 		os.write((df.format(d)).getBytes());
 		os.write("\n".getBytes());
@@ -130,11 +173,27 @@ public class WebWorker implements Runnable
 	 * @param os
 	 *          is the OutputStream object to write to
 	 **/
-	private void writeContent(OutputStream os) throws Exception
+	private void writeContent(OutputStream os, int response, StringBuffer sb) throws Exception
 	{
-		os.write("<html><head></head><body>\n".getBytes());
-		os.write("<h3>My web server works!</h3>\n".getBytes());
-		os.write("</body></html>\n".getBytes());
+		
+		// here is where you will output the html code onto the web broswer 
+		if (path.contains(".html") && response == 200) {
+			
+			// print the contents of the file
+			os.write(sb.toString().getBytes());
+		
+		} else if (response == 404) {
+			
+			// Do nothing, the 404 code in the HTTP header will
+			// cause the web browser to display an HTTP 404 error
+			
+		} else {
+			
+			os.write("<html><head></head><body>\n".getBytes());
+			os.write("<h3>My web server works!</h3>\n".getBytes());
+			os.write("</body></html>\n".getBytes());
+			
+		}
 	}
 
 } // end class
