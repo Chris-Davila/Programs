@@ -1,4 +1,4 @@
-<project default="compile" basedir=".">
+<project default="run" basedir="./www/">
     <property name="bin" location="bin"/>
 	<property name="src" location="src"/>
 
@@ -12,7 +12,7 @@
 		<javac srcdir="${src}/edu/nmsu/cs/webserver" destdir="${bin}"/>
 	</target>
 
-	<target name="run">
+	<target name="run" depends="compile">
 		<java classname="edu.nmsu.cs.webserver.WebServer">
 			<classpath path="${bin}"/>
 		</java>

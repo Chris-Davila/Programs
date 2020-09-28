@@ -22,13 +22,22 @@ package edu.nmsu.cs.webserver;
  **/
 
 import java.io.BufferedReader;
+import java.io.BufferedInputStream;
 import java.io.FileReader;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.File;
+import java.nio.IntBuffer;
+import java.nio.ByteBuffer;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.PathMatcher;
 import java.net.Socket;
-import java.net.URL;
-import java.net.URLConnection;
 import java.text.DateFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -39,9 +48,10 @@ public class WebWorker implements Runnable
 {
 
 	private Socket socket;
-	private String authority, path;
 	private int response;
-	private StringBuffer buffer;
+	private String authority, path;
+	private StringBuffer sBuffer;
+	//private IntBuffer intBuff;
 	/**
 	 * Constructor: must have a valid open socket
 	 **/
@@ -64,7 +74,7 @@ public class WebWorker implements Runnable
 			OutputStream os = socket.getOutputStream();
 			readHTTPRequest(is);
 			writeHTTPHeader(os, "text/html");
-			writeContent(os, response, buffer);
+			writeContent(os, sBuffer);
 			os.flush();
 			socket.close();
 		}
@@ -94,10 +104,9 @@ public class WebWorker implements Runnable
 				if (needPath == 1) {
 					request = line;
 					authority = request.split(" ")[0];
-					String tokens[] = request.split(" ");
-					// here I obtain the directory path to the html file
+					// here I obtain the URI to the data file
 					// the root is the directory where the webserver was executed
-					path = tokens[1];
+					path = request.split(" ")[1];
 					needPath = 0;
 				} // end if (needPath...
 				System.err.println("Request line: (" + line + ")");
@@ -124,39 +133,67 @@ public class WebWorker implements Runnable
 	private void writeHTTPHeader(OutputStream os, String contentType) throws Exception
 	{
 		LocalDate date = LocalDate.now();
-		String line = null;
-		response = 200;
+		String line = null, type = "";
+		//int coolbyte = -1;
 		Date d = new Date();
 		DateFormat df = DateFormat.getDateTimeInstance();
+		DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM-dd-yyyy");
+		FileSystem fs = FileSystems.getDefault();
+		PathMatcher pMatchFile, pMatchImg;
+		
+		// here I am getting the file system path that matches the URI
+		Path fsPath  = Paths.get(path);
+		fsPath = Paths.get("." + fsPath.toString());
+		System.out.println(fsPath.toString());
 		df.setTimeZone(TimeZone.getTimeZone("GMT"));
-		if (authority.matches("GET") && path.contains(".html")) {
-			buffer = new StringBuffer();
-			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM-dd-yyyy");
-			// here I must edit the path to recognize windows path structure
-			// comment out code up to the body of for statement to have 
-			// server work for Linux machines
-			String tokens[] = path.split("/");
-			path = ".";
-			for (int i = 0; i < tokens.length; i++)
-				path = path + "\\" + tokens[i]; 
-			try (BufferedReader br = new BufferedReader(new FileReader(path))) {
-				while((line = br.readLine()) != null) {
-					line = line.replaceAll("<cs371date>", date.format(formatter));
-					line = line.replaceAll("<cs371server>", "Chris Davila's Server");
-					buffer.append(line);
+		sBuffer = new StringBuffer();
+		response = checkPath(fsPath);
+		
+		if (authority.matches("GET") && response == 200) {
+			
+			pMatchFile = fs.getPathMatcher("glob:**.{html,txt}");
+			pMatchImg = fs.getPathMatcher("glob:**.{gif, png, jpeg}");
+			
+			if (pMatchFile.matches(fsPath)) { 
+				
+				contentType = Files.probeContentType(fsPath);
+				//DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM-dd-yyyy");
+				try (BufferedReader br = new BufferedReader(new FileReader(fsPath.toString()))) {
+					while((line = br.readLine()) != null) {
+						line = line.replaceAll("<cs371date>", date.format(formatter));
+						line = line.replaceAll("<cs371server>", "Chris Davila's Server");
+						sBuffer.append(line);
+					}
+				} 
+				catch (Exception e) {
+					response = 404;
+					//os.write("HTTP/1.0 404 Not Found\n".getBytes());
 				}
-			} 
-			catch (Exception e) {
-				response = 404;
-				os.write("HTTP/1.0 404 Not Found\n".getBytes());
+				
+			} else if (pMatchImg.matches(fsPath)) {
+				
+				contentType = Files.probeContentType(fsPath);
+				
+			} // end if-else if
+			
+		} // end if authority.matches ...
+		
+		if (response == 404) {
+			Path error = Paths.get("C:\\Users\\cdavila\\Documents\\CS_371\\Programs\\SimpleWebServer\\www\\404error.html");
+			contentType = Files.probeContentType(error);
+			BufferedReader br = new BufferedReader(new FileReader(error.toString()));
+			while((line = br.readLine()) != null) {
+				line = line.replaceAll("<cs371date>", date.format(formatter));
+				line = line.replaceAll("<cs371server>", "Chris Davila's Server");
+				sBuffer.append(line);
 			}
-		} // end if (authority.matches...
-		if (response == 200)
-			os.write("HTTP/1.1 200 OK\n".getBytes());
+			os.write("HTTP/1.0 404 Not Found\n".getBytes());
+		}
+		os.write("HTTP/1.1 200 OK\n".getBytes());
 		os.write("Date: ".getBytes());
 		os.write((df.format(d)).getBytes());
 		os.write("\n".getBytes());
-		os.write("Server: Jon's very own server\n".getBytes());
+		os.write("Server: Chris's very own server\n".getBytes());
 		// os.write("Last-Modified: Wed, 08 Jan 2003 23:11:55 GMT\n".getBytes());
 		// os.write("Content-Length: 438\n".getBytes());
 		os.write("Connection: close\n".getBytes());
@@ -173,19 +210,31 @@ public class WebWorker implements Runnable
 	 * @param os
 	 *          is the OutputStream object to write to
 	 **/
-	private void writeContent(OutputStream os, int response, StringBuffer sb) throws Exception
+	private void writeContent(OutputStream os, StringBuffer sb) throws Exception
 	{
+		int c = 0;
+		// here I am getting the file system path that matches the URI
+		Path fsPath  = Paths.get(path);
+		fsPath = Paths.get("." + fsPath.toString());
 		
 		// here is where you will output the html code onto the web broswer 
-		if (path.contains(".html") && response == 200) {
+		if (path.contains(".html") || path.contains(".txt")) {
 			
 			// print the contents of the file
 			os.write(sb.toString().getBytes());
-		
+			
+		} else if (path.contains(".gif") 
+				   || path.contains(".png")
+				   || path.contains(".jpg")) { 
+			
+			BufferedInputStream bin = new BufferedInputStream(new FileInputStream(fsPath.toString()));
+			while ((c = bin.read()) != -1)
+				os.write(c);
+			
 		} else if (response == 404) {
 			
-			// Do nothing, the 404 code in the HTTP header will
-			// cause the web browser to display an HTTP 404 error
+			// print the contents of the 404error file
+			os.write(sb.toString().getBytes());
 			
 		} else {
 			
@@ -195,5 +244,13 @@ public class WebWorker implements Runnable
 			
 		}
 	}
+	
+	private int checkPath(Path in_path) {
+		
+		if (!new File(in_path.toString()).exists())
+			return 404;
+		
+		return 200;
+	} 
 
 } // end class
