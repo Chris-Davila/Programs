@@ -51,7 +51,7 @@ public class WebWorker implements Runnable
 	private int response;
 	private String authority, path;
 	private StringBuffer sBuffer;
-	//private IntBuffer intBuff;
+
 	/**
 	 * Constructor: must have a valid open socket
 	 **/
@@ -133,13 +133,10 @@ public class WebWorker implements Runnable
 	private void writeHTTPHeader(OutputStream os, String contentType) throws Exception
 	{
 		LocalDate date = LocalDate.now();
-		String line = null, type = "";
-		//int coolbyte = -1;
+		String line = null;
 		Date d = new Date();
 		DateFormat df = DateFormat.getDateTimeInstance();
 		DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM-dd-yyyy");
-		FileSystem fs = FileSystems.getDefault();
-		PathMatcher pMatchFile, pMatchImg;
 		
 		// here I am getting the file system path that matches the URI
 		Path fsPath  = Paths.get(path);
@@ -151,13 +148,12 @@ public class WebWorker implements Runnable
 		
 		if (authority.matches("GET") && response == 200) {
 			
-			pMatchFile = fs.getPathMatcher("glob:**.{html,txt}");
-			pMatchImg = fs.getPathMatcher("glob:**.{gif, png, jpeg}");
+			PathMatcher pMatchFile = FileSystems.getDefault().getPathMatcher("glob:**.{html,txt}");
+			PathMatcher pMatchImg = FileSystems.getDefault().getPathMatcher("glob:**.{gif,png,jpg}");
 			
 			if (pMatchFile.matches(fsPath)) { 
 				
 				contentType = Files.probeContentType(fsPath);
-				//DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM-dd-yyyy");
 				try (BufferedReader br = new BufferedReader(new FileReader(fsPath.toString()))) {
 					while((line = br.readLine()) != null) {
 						line = line.replaceAll("<cs371date>", date.format(formatter));
@@ -167,7 +163,6 @@ public class WebWorker implements Runnable
 				} 
 				catch (Exception e) {
 					response = 404;
-					//os.write("HTTP/1.0 404 Not Found\n".getBytes());
 				}
 				
 			} else if (pMatchImg.matches(fsPath)) {
@@ -175,13 +170,14 @@ public class WebWorker implements Runnable
 				contentType = Files.probeContentType(fsPath);
 				
 			} // end if-else if
-			
-		} // end if authority.matches ...
+		} 
 		
 		if (response == 404) {
-			Path error = Paths.get("C:\\Users\\cdavila\\Documents\\CS_371\\Programs\\SimpleWebServer\\www\\404error.html");
-			contentType = Files.probeContentType(error);
-			BufferedReader br = new BufferedReader(new FileReader(error.toString()));
+			String errPath = "./www/404error.html";
+			fsPath = Paths.get(errPath);
+			System.out.println(fsPath.toString());
+			contentType = Files.probeContentType(fsPath);
+			BufferedReader br = new BufferedReader(new FileReader(fsPath.toString()));
 			while((line = br.readLine()) != null) {
 				line = line.replaceAll("<cs371date>", date.format(formatter));
 				line = line.replaceAll("<cs371server>", "Chris Davila's Server");
@@ -216,28 +212,36 @@ public class WebWorker implements Runnable
 		// here I am getting the file system path that matches the URI
 		Path fsPath  = Paths.get(path);
 		fsPath = Paths.get("." + fsPath.toString());
+		response = checkPath(fsPath);
 		
 		// here is where you will output the html code onto the web broswer 
-		if (path.contains(".html") || path.contains(".txt")) {
-			
+		if ((fsPath.toString().contains(".html") || fsPath.toString().contains(".txt"))
+				&& response == 200) {
 			// print the contents of the file
 			os.write(sb.toString().getBytes());
 			
-		} else if (path.contains(".gif") 
-				   || path.contains(".png")
-				   || path.contains(".jpg")) { 
+		} else if ((fsPath.toString().contains(".jpg") || fsPath.toString().contains(".png") 
+					|| fsPath.toString().contains(".gif")) && response == 404) {
+			String splPath[] = path.split("[\\/]+");
+			int strLen = splPath.length;
+			System.out.println("Number of strings=" + strLen);
+			String errPath = "./www/" + splPath[strLen-1];
+			fsPath = Paths.get(errPath);
+			BufferedInputStream bin = new BufferedInputStream(new FileInputStream(fsPath.toString()));
+			while ((c = bin.read()) != -1)
+				os.write(c);
 			
+		} else if (fsPath.toString().contains(".jpg") || fsPath.toString().contains(".png") 
+						|| fsPath.toString().contains(".gif")) {
 			BufferedInputStream bin = new BufferedInputStream(new FileInputStream(fsPath.toString()));
 			while ((c = bin.read()) != -1)
 				os.write(c);
 			
 		} else if (response == 404) {
-			
-			// print the contents of the 404error file
+			// print contents of 404 file
 			os.write(sb.toString().getBytes());
-			
-		} else {
-			
+		
+		}else {
 			os.write("<html><head></head><body>\n".getBytes());
 			os.write("<h3>My web server works!</h3>\n".getBytes());
 			os.write("</body></html>\n".getBytes());
